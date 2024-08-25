@@ -141,8 +141,6 @@ contract DreamAcademyLending is IPriceOracle {
             uint256 remainingCollateralValue = ((_depositETHs[msg.sender] -
                 amount) * LT) / 100;
 
-            console.logUint(remainingCollateralValue);
-            console.logUint(borrowValue);
             require(
                 remainingCollateralValue >= borrowValue,
                 "Insufficient collateral"

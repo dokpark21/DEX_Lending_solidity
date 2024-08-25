@@ -587,6 +587,8 @@ contract Testx is Test {
         vm.stopPrank();
     }
 
+    // checkpoint
+
     function testWithdrawYieldSucceeds() external {
         usdc.transfer(user3, 30000000 ether);
         vm.startPrank(user3);
