@@ -1,14 +1,7 @@
-pragma solidity ^0.8.13;
+pragma solidity ^0.8.20;
 
 library DSMath {
     uint256 constant RAY = 10 ** 27;
-
-    function add(uint256 a, uint256 b) internal pure returns (uint256) {
-        uint256 c = a + b;
-        require(c >= a, "DSMath: addition overflow");
-
-        return c;
-    }
 
     function mul(uint256 a, uint256 b) internal pure returns (uint256) {
         if (a == 0) {
