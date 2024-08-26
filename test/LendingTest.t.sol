@@ -637,13 +637,13 @@ contract Testx is Test {
         vm.roll(block.number + ((86400 * 1000) / 12));
         vm.prank(user3);
         assertTrue(
-            lending.getAccruedSupplyAmount(address(usdc)) / 1e18 == 30000792
+            lending.getAccruedSupplyAmount(address(usdc)) / 1e18 == 30000792 // 792
         );
 
         vm.roll(block.number + ((86400 * 500) / 12));
         vm.prank(user3);
         assertTrue(
-            lending.getAccruedSupplyAmount(address(usdc)) / 1e18 == 30001605
+            lending.getAccruedSupplyAmount(address(usdc)) / 1e18 == 30001605 // 1870 - 792 = 1078
         );
 
         vm.prank(user3);

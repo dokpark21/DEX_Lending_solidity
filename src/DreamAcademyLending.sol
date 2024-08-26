@@ -3,8 +3,8 @@ pragma solidity ^0.8.20;
 
 import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import "./DreamOracle.sol";
-// import console.sol
 import "forge-std/console.sol";
+import "./DSMath.sol";
 
 contract DreamAcademyLending is IPriceOracle {
     ERC20 usdc;
@@ -26,10 +26,12 @@ contract DreamAcademyLending is IPriceOracle {
     mapping(address => borrowUSDC) public _borrowUSDCs;
 
     uint256 totalBorrowedUSDCs;
+    uint256 lastUpdateInterestBlock;
+    uint256 totalUSDC;
 
     uint256 immutable LT = 75;
     uint256 immutable LTV = 50;
-    uint256 immutable INTEREST_RATE = 10e18;
+    uint256 immutable INTEREST_RATE = 1000000011568290959081926677;
 
     constructor(IPriceOracle _oracle, address _usdc) {
         oracle = _oracle;
@@ -60,6 +62,7 @@ contract DreamAcademyLending is IPriceOracle {
 
             usdc.transferFrom(msg.sender, address(this), amount);
             _depositUSDCs[msg.sender].amount += amount;
+            totalUSDC += amount;
 
             lenders.push(msg.sender);
         }
@@ -75,7 +78,7 @@ contract DreamAcademyLending is IPriceOracle {
         uint256 ethPrice = oracle.getPrice(address(0x0));
         require(usdcPrice != 0 && ethPrice != 0, "the price cannot be zero");
 
-        _borrowUSDCs[msg.sender].amount += _calculateInterest(
+        _borrowUSDCs[msg.sender].amount = _calculateInterest(
             _borrowUSDCs[msg.sender].amount,
             _borrowUSDCs[msg.sender].blockNumber,
             INTEREST_RATE
@@ -117,7 +120,37 @@ contract DreamAcademyLending is IPriceOracle {
         address user,
         address tokenAddress,
         uint256 amount
-    ) external {}
+    ) external {
+        uint256 ethPrice = oracle.getPrice(address(0x0));
+        uint256 usdcPrice = oracle.getPrice(address(usdc));
+
+        _borrowUSDCs[user].amount = _calculateInterest(
+            _borrowUSDCs[user].amount,
+            _borrowUSDCs[user].blockNumber,
+            INTEREST_RATE
+        );
+
+        _borrowUSDCs[user].blockNumber = block.number;
+
+        uint256 borrowValue = (_borrowUSDCs[user].amount * usdcPrice) /
+            ethPrice;
+
+        uint256 remainingCollateralValue = ((_depositETHs[user]) * LT) / 100;
+        require(
+            remainingCollateralValue < borrowValue,
+            "Sufficient collateral"
+        );
+        require(
+            amount == (_borrowUSDCs[user].amount * 1) / 4,
+            "Invalid amount"
+        );
+
+        require(usdc.balanceOf(address(this)) >= amount, "Insufficient funds");
+
+        _depositETHs[user] -= (amount * usdcPrice) / ethPrice;
+        _borrowUSDCs[user].amount -= amount;
+        totalBorrowedUSDCs -= amount;
+    }
 
     function withdraw(address tokenAddress, uint256 amount) external {
         require(amount != 0, "Invalid amount");
@@ -127,7 +160,7 @@ contract DreamAcademyLending is IPriceOracle {
             uint256 ethPrice = oracle.getPrice(address(0x0));
             uint256 usdcPrice = oracle.getPrice(address(usdc));
 
-            _borrowUSDCs[msg.sender].amount += _calculateInterest(
+            _borrowUSDCs[msg.sender].amount = _calculateInterest(
                 _borrowUSDCs[msg.sender].amount,
                 _borrowUSDCs[msg.sender].blockNumber,
                 INTEREST_RATE
@@ -149,18 +182,41 @@ contract DreamAcademyLending is IPriceOracle {
             _depositETHs[msg.sender] -= amount;
             payable(msg.sender).call{value: amount}("");
         } else {
+            uint256 ableToWithdraw = getAccruedSupplyAmount(address(usdc));
             require(
-                usdc.balanceOf(address(this)) >= amount,
+                usdc.balanceOf(address(this)) >= amount &&
+                    ableToWithdraw >= amount,
                 "Insufficient funds"
             );
+
+            if (_depositUSDCs[msg.sender].amount < amount) {
+                _depositUSDCs[msg.sender].interest -=
+                    amount -
+                    _depositUSDCs[msg.sender].amount;
+                _depositUSDCs[msg.sender].amount = 0;
+            } else {
+                _depositUSDCs[msg.sender].amount -= amount;
+            }
+
             usdc.transfer(msg.sender, amount);
-            _depositUSDCs[msg.sender].amount -= amount;
         }
     }
 
     function getAccruedSupplyAmount(
         address token
-    ) external view returns (uint256) {}
+    ) public updateDepositInterest returns (uint256) {
+        if (token == address(0x0)) {
+            return _depositETHs[msg.sender];
+        } else {
+            console.logUint(
+                (_depositUSDCs[msg.sender].amount +
+                    _depositUSDCs[msg.sender].interest) / 1e18
+            );
+            return
+                _depositUSDCs[msg.sender].amount +
+                _depositUSDCs[msg.sender].interest;
+        }
+    }
 
     function _getMaxBorrow(
         uint256 collateral,
@@ -180,12 +236,32 @@ contract DreamAcademyLending is IPriceOracle {
 
         uint256 timeInSeconds = blocks * 12;
 
-        uint256 perSecondInterestRate = annualInterestRate /
-            (365 * 24 * 60 * 60);
+        uint256 totalBorrow = DSMath.rmul(
+            amount,
+            DSMath.rpow(annualInterestRate, timeInSeconds)
+        );
 
-        uint256 interest = (amount * perSecondInterestRate * timeInSeconds) /
-            1e18;
+        return totalBorrow;
+    }
 
-        return interest;
+    modifier updateDepositInterest() {
+        uint256 beforeBorrowedUSDC = totalBorrowedUSDCs;
+        uint256 currentBorrowedUSDC = _calculateInterest(
+            totalBorrowedUSDCs,
+            lastUpdateInterestBlock,
+            INTEREST_RATE
+        );
+
+        uint256 interest = currentBorrowedUSDC - beforeBorrowedUSDC;
+
+        for (uint256 i = 0; i < lenders.length; i++) {
+            address user = lenders[i];
+            _depositUSDCs[user].interest +=
+                (interest * _depositUSDCs[user].amount) /
+                totalUSDC;
+        }
+        lastUpdateInterestBlock = block.number;
+        totalBorrowedUSDCs = currentBorrowedUSDC;
+        _;
     }
 }
